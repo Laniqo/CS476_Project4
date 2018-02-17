@@ -1,0 +1,8 @@
+TO DO:
+	1. Create a new Flask application mt_api.py that exposes RESTful URL endpoints for JSON data, rather than generating HTML.
+	2. document the API by creating a table similar to Tables 4-1, 4-2, and 4-3 for each resource.
+	3. All data sent to and from the API should be in JSON format with the Content-Type application/json. To determine which fields should be present for incoming JSON objects, see the corresponding HTML forms. To determine which fields should be present for outgoing JSON objects, see the context parameters passed to the render_template method.
+	4. For each API method, document the JSON objects sent in requests or received in replies as in Listing 4-1 in the textbook.
+	5. Responses from the API should include HTTP status codes appropriate to each method. Responses should be in JSON, not in HTML.
+	6. API may NOT use Flask session object to maintain state between requests
+	use Flask-basicAuth ext,  subclassing BasicAuth and overriding check_credentials to read from the user table.
