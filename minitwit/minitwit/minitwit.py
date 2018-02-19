@@ -41,6 +41,22 @@ def get_db():
     return top.sqlite_db
 
 
+def populate_db():
+    #Populates the database.
+    db = get_db()
+    fd = open('population.sql', 'r')
+    populate = fd.read()
+    fd.close();
+
+    sqlCommands = populate.split(';')
+
+    for command in sqlCommands:
+        try:
+            db.cursor().execute(command)
+            db.commit()
+        except OperationalError, msg:
+            print "Command skipped: ", msg
+
 @app.teardown_appcontext
 def close_database(exception):
     """Closes the database again at the end of the request."""
@@ -62,6 +78,12 @@ def initdb_command():
     """Creates the database tables."""
     init_db()
     print('Initialized the database.')
+
+@app.cli.command('populatedb')
+def populatedb_command():
+    """Creates the database tables."""
+    populate_db()
+    print('Loads the database with users.')
 
 
 def query_db(query, args=(), one=False):
