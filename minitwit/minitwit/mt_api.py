@@ -1,10 +1,26 @@
 import minitwit
 from flask import Flask, request, jsonify, g, make_response
 from flask_basicauth import BasicAuth
+from werkzeug import check_password_hash
 
 app = Flask('minitwit')
 
-auth = BasicAuth(app)
+class DatabaseAuth(BasicAuth):
+	def __init__(self, app):
+		BasicAuth.__init__(self, app)
+
+	def check_credentials(self, username, password):
+		print 'Checking %s - %s' % (username, password)
+		# look up username in DB
+		user = minitwit.query_db('select * from user where username = ?', [username], one=True)
+		if user['username'] == username and check_password_hash(user['pw_hash'], password):
+		    # return True if hashed password matches password from DB
+		    g.user = username
+		    return True   
+		else:
+		    return False
+
+auth = DatabaseAuth(app)
 #app.config['BASIC_AUTH_FORCE'] = True
 
 def populate_db():
@@ -25,9 +41,9 @@ def populatedb_command():
 def not_found(error):
     return make_response(jsonify({'error': 'Not found'}), 404)
 
-@auth.error_handler
-def unauthorized():
-    return make_response(jsonify({'error': 'Unauthorized access'}), 403)
+#@auth.error_handler
+#def unauthorized():
+#    return make_response(jsonify({'error': 'Unauthorized access'}), 403)
 
 
 @app.route('/thread/public', methods=['GET'])
@@ -42,18 +58,21 @@ def public_thread():
 
 
 @app.route('/thread/home', methods=['GET'])
+@auth.required
 def home_timeline():
     """shows feed of the user and all the user is the following"""
     if not g.user:
         return abort(403)
 
-    msg = minitwit.query_db('''select message.*, user.* from message, user
+	# in order to run this query, we need to retrieve the user_id give the username in g.user
+    user = minitwit.query_db('select * from user where username = ?', [g.user], one=True)
+    tweets = minitwit.query_db('''select message.*, user.* from message, user
     where message.author_id = user.user_id and (
         user.user_id = ? or
         user.user_id in (select whom_id from follower
                                 where who_id = ?))
     order by message.pub_date desc limit ?''',
-    [session['user_id'], session['user_id'], PER_PAGE])
+    [user['user_id'], user['user_id'], minitwit.PER_PAGE])
     print tweets
     tweets = map(dict, tweets)
     print tweets
