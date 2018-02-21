@@ -196,8 +196,7 @@ def register():
             return jsonify({'error': 'passwords need to match'}, 406)
         else:
             '''check for duplicate user'''
-            duplicate = minitwit.query_db('''select count(*) from user where username = ? and email = ?''', [data['username'], data['email']])
-            if len(duplicate) > 0:
+            if minitwit.get_user_id(data["username"] is not None)
                 return jsonify({'Error': 'user already exists'}, 406)
             else:
                 db = minitwit.get_db()
