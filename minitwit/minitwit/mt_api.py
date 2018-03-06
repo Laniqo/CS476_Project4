@@ -69,12 +69,12 @@ def not_found(error):
 
 @app.errorhandler(405)
 def method_not_allowed(error):
-    return make_response(jsonify({'error: Method not allowed'}, 405))
+    return make_response(jsonify({'error': 'Method not allowed'}, 405))
 
 
 @app.route('/posts/public', methods=['GET'])
 def public_thread():
-    '''Returns all the msgs of all users'''
+    '''Returns all the posted msgs of all users'''
     msg = minitwit.query_db('''select message.*, user.user_id, user.username, user.email from message, user
     where message.author_id = user.user_id
     order by message.pub_date desc limit ?''', [minitwit.PER_PAGE])
@@ -105,12 +105,9 @@ def user_timeline(username):
     if not g.user:
 		abort(401)
 
-    user = minitwit.query_db('select * from user where username = ?', [username], one=True)
-    if user is None:
-		abort(404)
     messages = minitwit.query_db('''select message.*, user.username, user.user_id from message, user
         where message.author_id = user.user_id and (user.user_id = ?)
-        order by message.pub_date desc limit ?''', [user['user_id'], minitwit.PER_PAGE])
+        order by message.pub_date desc limit ?''', [g.user['user_id'], minitwit.PER_PAGE])
 
     msg = map(dict, messages)
     return jsonify(msg)
@@ -123,8 +120,9 @@ def user_following(username):
         abort(404)
     if not g.user:
 		abort(401)
-    if(not request.json):
-        abort(405)
+	if request.method == "PUT":
+        if(not request.json):
+            abort(405)
 
     info = request.get_json()
 
@@ -142,13 +140,14 @@ def user_following(username):
 def unfollow_user(username):
     """Removes the current user as a follower of the given username parameter."""
     if not g.user:
-        abort(401)
-    user = minitwit.query_db('select * from user where username = ?', [g.user['username']], one=True)
-
+        abort(401)   
+    if request.method == "DELETE":
+       if(not request.json):
+            abort(400)    
     whom_id = minitwit.get_user_id(username)
     if whom_id is None:
         abort(404)
-
+       
     db = minitwit.get_db()
     db.execute('delete from follower where who_id=? and whom_id=?',
               [user['user_id'], whom_id])
@@ -160,18 +159,14 @@ def unfollow_user(username):
 @auth.required
 def post_message():
     """registers a new post/message for current user."""
-
     if not g.user:
 		abort(401)
-
     if request.method == "POST":
         if(not request.json):
             abort(400)
 
         info = request.get_json()
-
-        user = minitwit.query_db('select * from user where username = ?', [g.user['username']], one=True)
-        msg = info['text']
+        msg = info['text'] #gets the message that user wants to post
 
         db = minitwit.get_db()
         db.execute('''insert into message (author_id, text, pub_date) values (?, ?, ?)''', [g.user['user_id'], msg, int(time.time())])
@@ -188,9 +183,9 @@ def register():
         data = request.get_json()
 
         if not data["username"] or not data["password"] or not data["email"] or not data["password2"]:
-            abort(make_response(jsonify({'Error': "Please enter correct information"}), 400))
+            abort(make_response(jsonify({'Error': "Please enter correct information"}), 402))
         elif data["password"] != data["password2"]:
-            abort(make_response(jsonify({'Error': "Passwords need to match"}), 406))
+            abort(make_response(jsonify({'Error': "Passwords need to match"}), 402))
         else:
             '''check for duplicate user'''
             if minitwit.get_user_id(data["username"]) is not None:
