@@ -1,39 +1,55 @@
 import minitwit
 import time
-from flask import Flask, request, jsonify, g, make_response, abort
+from sqlite3 import dbapi2 as sqlite3
+from flask import Flask, request, jsonify, g, make_response, abort, _app_ctx_stack
 from flask_basicauth import BasicAuth
 from werkzeug import check_password_hash, generate_password_hash
 from sqlite3 import OperationalError
 
+
+#configuration
+DATABASE = 'database.db'
+PER_PAGE = 30
+DEBUG = True
+SECRET_KEY = b'_5#y2L"F4Q8z\n\xec]/'
+
 app = Flask(__name__)
+app.config.from_object(__name__)
+app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
-class DatabaseAuth(BasicAuth):
-	def __init__(self, app):
-		BasicAuth.__init__(self, app)
 
-	def check_credentials(self, username, password):
-		print 'Checking %s - %s' % (username, password)
-		# look up username in DB
-		user = minitwit.query_db('select * from user where username = ?', [username], one=True)
+def get_db():
+    """Opens a new database connection if there is none yet for the
+    current application context.
+    """
+    top = _app_ctx_stack.top
+    if not hasattr(top, 'sqlite_db'):
+        top.sqlite_db = sqlite3.connect(app.config['DATABASE'])
+        top.sqlite_db.row_factory = sqlite3.Row
+    return top.sqlite_db
 
-		if user is None:
-			abort(make_response(jsonify(message="User does not exist"),401))
+    @app.teardown_appcontext
+def close_database(exception):
+    """Closes the database again at the end of the request."""
+    top = _app_ctx_stack.top
+    if hasattr(top, 'sqlite_db'):
+        top.sqlite_db.close()
 
-		if user['username'] == username and check_password_hash(user['pw_hash'], password):
-		    # return True if hashed password matches password from DB
-		    g.user = minitwit.query_db('select * from user where username = ?',
-                              [username], one=True)
-		    return True
-		else:
-			return False
-		    #abort(make_response(jsonify(message="Unauthorized access. Correct username and password required"), 401))
+@app.cli.command('initdb')
+def initdb_command():
+    """Creates the database tables."""
+    init_db()
+    print('Initialized the database.')
 
-auth = DatabaseAuth(app)
-
+@app.cli.command('populatedb')
+def populatedb_command():
+    """Inputs data in database tables."""
+    populate_db()
+    print('Database population is completed.')
 
 def populate_db():
     #Populates the database.
-    db = minitwit.get_db()
+    db = get_db()
     fd = open('population.sql', 'r')
     populate = fd.read()
     fd.close();
@@ -47,12 +63,40 @@ def populate_db():
         except OperationalError, msg:
             print "Command skipped: ", msg
 
+def init_db():
+    """Initializes the database."""
+    db = get_db()
+    with app.open_resource('schema.sql', mode='r') as f:
+        db.cursor().executescript(f.read())
+    db.commit()
 
-@app.cli.command('populatedb')
-def populatedb_command():
-    """Inputs data in database tables."""
-    populate_db()
-    print('Database population is completed.')
+
+
+class DatabaseAuth(BasicAuth):
+	def __init__(self, app):
+		BasicAuth.__init__(self, app)
+
+	def check_credentials(self, username, password):
+		print 'Checking %s - %s' % (username, password)
+		# look up username in DB
+		user = query_db('select * from user where username = ?', [username], one=True)
+
+		if user is None:
+			abort(make_response(jsonify(message="User does not exist"),401))
+
+		if user['username'] == username and check_password_hash(user['pw_hash'], password):
+		    # return True if hashed password matches password from DB
+		    g.user = query_db('select * from user where username = ?',
+                              [username], one=True)
+		    return True
+		else:
+			return False
+		    #abort(make_response(jsonify(message="Unauthorized access. Correct username and password required"), 401))
+
+auth = DatabaseAuth(app)
+
+
+
 
 """Error messages Jsonified"""
 @app.errorhandler(400)
@@ -71,15 +115,45 @@ def not_found(error):
 def method_not_allowed(error):
     return make_response(jsonify({'error': 'Method not allowed'}, 405))
 
+def get_user_id(username):
+    """Convenience method to look up the id for a username."""
+    rv = query_db('select user_id from user where username = ?',
+                  [username], one=True)
+    return rv[0] if rv else None
+
+#added this for the timeline page
+@app.route('/followed/<user_id>/<profile_id>', methods=['GET', 'POST'])
+def followed(user_id, profile_id):
+    followed = query_db('''select 1 from follower where
+        follower.who_id = ? and follower.whom_id = ?''',
+        [user_id, profile_id], one=True)
+    return jsonify(followed)
+
+#helper functions that grab the user's info by user_id or username
+@app.route('/user_info/<user_id>', methods=['GET', 'POST'])
+def user_info(user_id):
+    user = query_db('select * from user where user_id = ?', [user_id], one=True)
+    if user is None:
+        abort(404)
+    return jsonify(user);
+
+@app.route('/username/<username>', methods=['GET', 'POST'])
+def username(username):
+    user = query_db('select * from user where username = ?', [username], one=True)
+    if user is None:
+        abort(404)
+    return jsonify(user);
 
 @app.route('/posts/public', methods=['GET'])
 def public_thread():
     '''Returns all the posted msgs of all users'''
-    msg = minitwit.query_db('''select message.*, user.user_id, user.username, user.email from message, user
+    msg = query_db('''select message.*, user.user_id, user.username, user.email from message, user
     where message.author_id = user.user_id
-    order by message.pub_date desc limit ?''', [minitwit.PER_PAGE])
+    order by message.pub_date desc limit ?''', [PER_PAGE])
     msg = map(dict, msg)
     return jsonify(msg)
+
+
 
 @app.route('/home', methods=['GET'])
 @auth.required
@@ -88,10 +162,10 @@ def home_timeline():
     if not g.user:
         abort(401)
 
-    msg = minitwit.query_db('''select message.*, user.user_id, user.username, user.email from message, user
+    msg = query_db('''select message.*, user.user_id, user.username, user.email from message, user
         where message.author_id = user.user_id and (user.user_id = ? or user.user_id in (select whom_id from follower
                                 where who_id = ?)) order by message.pub_date desc limit ?''',
-                                [g.user['user_id'], g.user['user_id'], minitwit.PER_PAGE])
+                                [g.user['user_id'], g.user['user_id'], PER_PAGE])
     msg = map(dict, msg)
     return jsonify(msg)
 
@@ -105,14 +179,14 @@ def user_timeline(username):
     if not g.user:
 		abort(401)
 
-    messages = minitwit.query_db('''select message.*, user.username, user.user_id from message, user
+    messages = query_db('''select message.*, user.username, user.user_id from message, user
         where message.author_id = user.user_id and (user.user_id = ?)
-        order by message.pub_date desc limit ?''', [g.user['user_id'], minitwit.PER_PAGE])
+        order by message.pub_date desc limit ?''', [g.user['user_id'], PER_PAGE])
 
     msg = map(dict, messages)
     return jsonify(msg)
 
-@app.route('/follow/<username>', methods=['PUT', 'GET'])
+@app.route('/<username>/follow', methods=['PUT', 'GET'])
 @auth.required
 def user_following(username):
     '''sets the current user(username) to follow new user (uid)'''
@@ -126,28 +200,28 @@ def user_following(username):
 
     info = request.get_json()
 
-    whom_id = minitwit.get_user_id(username)
+    whom_id = get_user_id(username)
     if whom_id is None:
 		abort(404)
 
-    db = minitwit.get_db()
+    db = get_db()
     db.execute('insert into follower (who_id, whom_id) values (?, ?)', [g.user['user_id'],whom_id])
     db.commit()
     return jsonify({'follower':g.user['username'], 'following': username, 'Message': 'User successfully followed', 'Status code':201})
 
-@app.route('/unfollow/<username>', methods=['DELETE', 'GET'])
+@app.route('/<username>/unfollow', methods=['DELETE', 'GET'])
 @auth.required
 def unfollow_user(username):
     """Removes the current user as a follower of the given username parameter."""
     if not g.user:
-        abort(401)   
+        abort(401)
     if request.method == "DELETE":
        if(not request.json):
-            abort(400)    
-    whom_id = minitwit.get_user_id(username)
+            abort(400)
+    whom_id = get_user_id(username)
     if whom_id is None:
         abort(404)
-       
+
     db = minitwit.get_db()
     db.execute('delete from follower where who_id=? and whom_id=?',
               [user['user_id'], whom_id])
@@ -168,7 +242,7 @@ def post_message():
         info = request.get_json()
         msg = info['text'] #gets the message that user wants to post
 
-        db = minitwit.get_db()
+        db = get_db()
         db.execute('''insert into message (author_id, text, pub_date) values (?, ?, ?)''', [g.user['user_id'], msg, int(time.time())])
         db.commit()
 
@@ -188,10 +262,10 @@ def register():
             abort(make_response(jsonify({'Error': "Passwords need to match"}), 402))
         else:
             '''check for duplicate user'''
-            if minitwit.get_user_id(data["username"]) is not None:
+            if get_user_id(data["username"]) is not None:
                 abort(make_response(jsonify({'Error': "User already exists"}), 406))
             else:
-                db = minitwit.get_db()
+                db = get_db()
                 password = generate_password_hash(data['password'])
                 db.execute('''insert into user (username, email, pw_hash) values (?, ?, ?)'''
                 ,[data['username'], data['email'], password])
