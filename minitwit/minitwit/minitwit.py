@@ -20,16 +20,14 @@ from flask import Flask, request, session, url_for, redirect, \
      render_template, abort, g, flash, _app_ctx_stack
 from werkzeug import check_password_hash, generate_password_hash
 
-
+SECRET_KEY = b'_5#y2L"F4Q8z\n\xec]/'
 
 app = Flask('minitwit')
 app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
-#mt_api url
+#MT_API URL Config
 URL = 'http://localhost:5001/'
-
-
 
 def format_datetime(timestamp):
     """Format a timestamp for display."""
@@ -46,10 +44,9 @@ def gravatar_url(email, size=80):
 def before_request():
     g.user = None
     if 'user_id' in session:
-    	payload = {'user_id' : session['user_id']}
-        r = requests.get(URL + 'user_info' + str(session['user_id']), json=payload)
+        payload = {'user_id': session['user_id']}
+        r = requests.get(URL + 'user_info/' + str(session['user_id']), json=payload)
         g.user = r.json()
-
 
 @app.route('/')
 def timeline():
@@ -60,7 +57,8 @@ def timeline():
     if not g.user:
         return redirect(url_for('public_timeline'))
 
-    payload = {}
+    payload = {'user_id': session['user_id']}
+
     r = requests.get(URL + 'home', json=payload)
 
     return render_template('timeline.html', messages=r.json())
@@ -77,9 +75,12 @@ def public_timeline():
 @app.route('/<username>')
 def user_timeline(username):
     """Display's a users tweets."""
+
+    #grab the current profile's info
     payload={'username': username}
 
-    r = requests.get(URL + 'username/'+ str(username), json=payload)
+    r = requests.get(URL + 'confirm_username/'+ str(username), json=payload)
+
     profile_user = r.json()
 
     if profile_user is None:
@@ -89,63 +90,71 @@ def user_timeline(username):
     if g.user:
         payload = {'user_id': session['user_id'], 'profile_id': profile_user['user_id']}
         r = requests.get(URL + 'followed/'+ str(session['user_id']) + '/' + str(profile_user['user_id']), json = payload)
-        followed = r.json() is not None
+        followed = r.json()
 
-    r = requests.get(URL + 'posts/' + str(username))
+    payload={'username': username}
+    r = requests.get(URL + 'posts/' + str(username), json=payload)
+
     return render_template('timeline.html', messages=r.json(), followed=followed,
-            profile_user=profile_user[0])
+            profile_user=profile_user)
 
 
-@app.route('/<username>/follow')
+@app.route('/<username>/follow', methods=['PUT', 'POST'])
 def follow_user(username):
     """Adds the current user as follower of the given user."""
     if not g.user:
         abort(401)
-    whom_id = mt_api.get_user_id(username)
-    if whom_id is None:
-        abort(404)
-    payload = {'username' : username}
-    r = requests.post(URL + str(username) + '/follow', params=payload)
+
+    payload = {'current_user' : session['user_id'], 'profile_user': username}
+    r = requests.post(URL + str(username) + '/follow', json=payload)
+
     flash('You are now following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
 
 
-@app.route('/<username>/unfollow')
+@app.route('/<username>/unfollow',methods=['PUT', 'DELETE'])
 def unfollow_user(username):
     """Removes the current user as follower of the given user."""
     if not g.user:
         abort(401)
-    whom_id = minitwit.get_user_id(username)
-    if whom_id is None:
-        abort(404)
-    payload = {'username' : username}
+
+    payload = {'current_user' : session['user_id'], 'profile_user': username}
     r = requests.delete(URL + str(username) + '/unfollow', json=payload)
+
     flash('You are no longer following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
 
 
-@app.route('/add_message', methods=['POST'])
+@app.route('/add_message', methods=['POST', 'GET'])
 def add_message():
     """Registers a new message for the user."""
     if 'user_id' not in session:
         abort(401)
 
-    if request.form['text']:
+    if request.method == 'POST':
+        print 'LINE 135 ********** THIS EXECUTED'
         payload = {'user_id': session['user_id'], 'text': request.form['text']}
-        r = requests.post(URL + 'post_message', json= payload)
-        print r
-        flash('Your message was recorded')
+        r = requests.post(URL + 'post_message', json= payload, stream=True)
+        #print str(r.json())
+        if r.status_code == 200:
+            flash('Your message was recorded')
+            return redirect(url_for('timeline'))
+
     return redirect(url_for('timeline'))
 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Logs the user in."""
+
     if g.user:
         return redirect(url_for('timeline'))
     error = None
     if request.method == 'POST':
-        r = requests.get(URL + 'username/' + str(request.form['username']))
+        payload={'username':request.form['username']}
+        username = request.form['username']
+        r = requests.get(URL + 'confirm_username/' + str(username), json=payload)
+
         user = r.json()
         if user is None:
             error = 'Invalid username'
@@ -154,15 +163,16 @@ def login():
             error = 'Invalid password'
         else:
             flash('You were logged in')
-            g.user = user
             session['user_id'] = user['user_id']
             return redirect(url_for('timeline'))
+
     return render_template('login.html', error=error)
 
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """Registers the user."""
+
     if g.user:
         return redirect(url_for('timeline'))
     error = None
@@ -176,18 +186,16 @@ def register():
             error = 'You have to enter a password'
         elif request.form['password'] != request.form['password2']:
             error = 'The two passwords do not match'
-        elif minitwit.get_user_id(request.form['username']) is not None:
+        elif mt_api.get_user_id(request.form['username']) is not None:
             error = 'The username is already taken'
         else:
             payload = {'username' : request.form['username'], 'email': request.form['email'],
-            'password': request.form['password']}
+            'password': request.form['password'],'password2': request.form['password2']}
 
             r = requests.post(URL + 'register', json= payload)
-            print r
             flash('You were successfully registered and can login now')
             return redirect(url_for('login'))
     return render_template('register.html', error=error)
-
 
 @app.route('/logout')
 def logout():

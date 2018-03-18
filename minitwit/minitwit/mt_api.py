@@ -6,7 +6,6 @@ from flask_basicauth import BasicAuth
 from werkzeug import check_password_hash, generate_password_hash
 from sqlite3 import OperationalError
 
-
 #configuration
 DATABASE = 'database.db'
 PER_PAGE = 30
@@ -33,6 +32,7 @@ def get_db():
         top.sqlite_db.row_factory = sqlite3.Row
     return top.sqlite_db
 
+
 @app.teardown_appcontext
 def close_database(exception):
     """Closes the database again at the end of the request."""
@@ -40,17 +40,20 @@ def close_database(exception):
     if hasattr(top, 'sqlite_db'):
         top.sqlite_db.close()
 
+
 @app.cli.command('initdb')
 def initdb_command():
     """Creates the database tables."""
     init_db()
     print('Initialized the database.')
 
+
 @app.cli.command('populatedb')
 def populatedb_command():
     """Inputs data in database tables."""
     populate_db()
     print('Database population is completed.')
+
 
 def populate_db():
     #Populates the database.
@@ -68,13 +71,13 @@ def populate_db():
         except OperationalError, msg:
             print "Command skipped: ", msg
 
+
 def init_db():
     """Initializes the database."""
     db = get_db()
     with app.open_resource('schema.sql', mode='r') as f:
         db.cursor().executescript(f.read())
     db.commit()
-
 
 
 class DatabaseAuth(BasicAuth):
@@ -123,27 +126,49 @@ def get_user_id(username):
                   [username], one=True)
     return rv[0] if rv else None
 
-#added this for the timeline page
+def get_user_name(user_id):
+    """Convenience method to look up the id for a username."""
+    rv = query_db('select username from user where user_id = ?',
+                  [user_id], one=True)
+    return rv[0] if rv else None
+
+
+#added this for the timeline page to check if current user is following
+#the user of the current profile being viewed
 @app.route('/followed/<user_id>/<profile_id>', methods=['GET', 'POST'])
 def followed(user_id, profile_id):
+    json_object = request.get_json()
     followed = query_db('''select 1 from follower where
         follower.who_id = ? and follower.whom_id = ?''',
-        [user_id, profile_id], one=True)
-    return jsonify(followed)
+        [json_object['user_id'], json_object['profile_id']], one=True) is not None
+
+    #if user is following current profile being viewed, returns true
+    if followed:
+        return jsonify(followed)
+    #else return False
+    else:
+        return jsonify(followed)
+
 
 #helper functions that grab the user's info by user_id or username
 @app.route('/user_info/<user_id>', methods=['GET', 'POST'])
 def user_info(user_id):
-    user = query_db('select * from user where user_id = ?', [user_id], one=True)
+    json_object = request.get_json()
+    user = query_db('select * from user where user_id = ?', [json_object['user_id']], one=True)
     if user is None:
         abort(404)
+    user = dict(user)
     return jsonify(user);
 
-@app.route('/username/<username>', methods=['GET', 'POST'])
-def username(username):
-    user = query_db('select * from user where username = ?', [username], one=True)
+@app.route('/confirm_username/<username>', methods=['GET', 'POST'])
+def confirm_username(username):
+    json_object = request.get_json()
+    user = query_db('select * from user where username = ?', [json_object['username']], one=True)
     if user is None:
         abort(404)
+
+    user = dict(user)
+
     return jsonify(user);
 
 @app.route('/posts/public', methods=['GET'])
@@ -156,79 +181,90 @@ def public_thread():
     return jsonify(msg)
 
 
-
 @app.route('/home', methods=['GET'])
-@auth.required
 def home_timeline():
     """Shows feed of the current user and all the user is following. If no user is logged in, redirect to public page"""
-    if not g.user:
-        abort(401)
+
+    json_object = request.get_json()
 
     msg = query_db('''select message.*, user.user_id, user.username, user.email from message, user
         where message.author_id = user.user_id and (user.user_id = ? or user.user_id in (select whom_id from follower
                                 where who_id = ?)) order by message.pub_date desc limit ?''',
-                                [g.user['user_id'], g.user['user_id'], PER_PAGE])
+                                [json_object['user_id'], json_object['user_id'], PER_PAGE])
     msg = map(dict, msg)
+
     return jsonify(msg)
 
 
 @app.route('/posts/<username>', methods=['GET'])
-@auth.required
 def user_timeline(username):
     """Returns the messages/posts of a specific user"""
     if(len(username) == 0):
         abort(404)
-    if not g.user:
-		abort(401)
-
-    messages = query_db('''select message.*, user.username, user.user_id from message, user
+    #if not g.user:
+	#	abort(401)
+    json_object = request.get_json()
+    uid = get_user_id(json_object['username'])
+    messages = query_db('''select message.*, user.* from message, user
         where message.author_id = user.user_id and (user.user_id = ?)
-        order by message.pub_date desc limit ?''', [g.user['user_id'], PER_PAGE])
+        order by message.pub_date desc limit ?''', [uid, PER_PAGE])
 
     msg = map(dict, messages)
+
     return jsonify(msg)
 
-@app.route('/<username>/follow', methods=['PUT', 'GET'])
+@app.route('/<username>/follow', methods=['PUT', 'POST', 'GET'])
 @auth.required
-def user_following(username):
+def follow_user(username):
     '''sets the current user(username) to follow new user (uid)'''
     if(len(username) == 0):
         abort(404)
     if not g.user:
 		abort(401)
-    if request.method == "PUT":
+    if request.method == "POST":
         if(not request.json):
             abort(405)
 
-    info = request.get_json()
+    json_object = request.get_json()
 
-    whom_id = get_user_id(username)
+    whom_id = get_user_id(json_object['profile_user'])
     if whom_id is None:
 		abort(404)
 
+    who_id = json_object['current_user']
+    if who_id is None:
+    	abort(404)
+
     db = get_db()
-    db.execute('insert into follower (who_id, whom_id) values (?, ?)', [g.user['user_id'],whom_id])
+    db.execute('insert into follower (who_id, whom_id) values (?, ?)', [who_id,whom_id])
     db.commit()
-    return jsonify({'follower':g.user['username'], 'following': username, 'Message': 'User successfully followed', 'Status code':201})
+
+    return jsonify(json_object)
 
 @app.route('/<username>/unfollow', methods=['DELETE', 'GET'])
-@auth.required
 def unfollow_user(username):
     """Removes the current user as a follower of the given username parameter."""
     if not g.user:
         abort(401)
+
     if request.method == "DELETE":
        if(not request.json):
             abort(400)
-    whom_id = get_user_id(username)
+
+    json_object = request.get_json()
+    whom_id = get_user_id(json_object['profile_user'])
     if whom_id is None:
         abort(404)
 
-    db = minitwit.get_db()
+    who_id = json_object['current_user']
+    if who_id is None:
+        abort(404)
+
+    db = get_db()
     db.execute('delete from follower where who_id=? and whom_id=?',
-              [user['user_id'], whom_id])
+              [who_id, whom_id])
     db.commit()
-    return jsonify({'follower':g.user['username'], 'unfollowed': username, 'Message': 'User successfully unfollowed','Status code':201})
+    return jsonify(json_object)
 
 
 @app.route('/post_message', methods=['POST', 'GET'])
@@ -241,14 +277,14 @@ def post_message():
         if(not request.json):
             abort(400)
 
-        info = request.get_json()
-        msg = info['text'] #gets the message that user wants to post
+        json_object = request.get_json()
+        text = json_object['text']
 
         db = get_db()
-        db.execute('''insert into message (author_id, text, pub_date) values (?, ?, ?)''', [g.user['user_id'], msg, int(time.time())])
+        db.execute('''insert into message (author_id, text, pub_date) values (?, ?, ?)''', [json_object['user_id'], text, int(time.time())])
         db.commit()
 
-        return jsonify({'username': g.user['username'], 'message': msg, 'time': int(time.time()), 'status' : 'message successfully added', 'Status code':201})
+        return jsonify(json_object)
 
 @app.route('/register', methods=['POST', 'GET'])
 def register():
