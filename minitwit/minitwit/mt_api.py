@@ -17,6 +17,11 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
+def query_db(query, args=(), one=False):
+    """Queries the database and returns a list of dictionaries."""
+    cur = get_db().execute(query, args)
+    rv = cur.fetchall()
+    return (rv[0] if rv else None) if one else rv
 
 def get_db():
     """Opens a new database connection if there is none yet for the
@@ -28,7 +33,7 @@ def get_db():
         top.sqlite_db.row_factory = sqlite3.Row
     return top.sqlite_db
 
-    @app.teardown_appcontext
+@app.teardown_appcontext
 def close_database(exception):
     """Closes the database again at the end of the request."""
     top = _app_ctx_stack.top
@@ -94,9 +99,6 @@ class DatabaseAuth(BasicAuth):
 		    #abort(make_response(jsonify(message="Unauthorized access. Correct username and password required"), 401))
 
 auth = DatabaseAuth(app)
-
-
-
 
 """Error messages Jsonified"""
 @app.errorhandler(400)
@@ -194,7 +196,7 @@ def user_following(username):
         abort(404)
     if not g.user:
 		abort(401)
-	if request.method == "PUT":
+    if request.method == "PUT":
         if(not request.json):
             abort(405)
 
