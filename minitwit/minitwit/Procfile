@@ -1,7 +1,3 @@
-web: python minitwit.py -p
-worker: bundle exec rake resque:work QUEUE=*
-clock: bundle exec rake resque:scheduler
-ticker:  ruby ./ticker 5000
-error:   ruby ./error
-utf8:    ruby ./utf8
-spawner: ./spawner
+minitwitFront: FLASK_APP=minitwit.py flask run -p $PORT
+mt_API_Back: FLASK_APP=mt_api.py flask run -p $PORT
+

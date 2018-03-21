@@ -26,8 +26,8 @@ app = Flask('minitwit')
 app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
-#MT_API URL Config
-URL = 'http://localhost:5001/'
+#MT_API URL Config *******this will change to port 8080 for nginx back end ********
+URL = 'http://localhost:5101/'
 
 def format_datetime(timestamp):
     """Format a timestamp for display."""
@@ -156,9 +156,13 @@ def login():
         r = requests.get(URL + 'confirm_username/' + str(username), json=payload)
 
         user = r.json()
+        print 'USER is %r' % user
+        print 'FORM is %r' % request.form
         if user is None:
             error = 'Invalid username'
-        elif not check_password_hash(request.form['pw_hash'],
+        elif 'error' in user:
+            error = user['error']
+        elif not check_password_hash(user['pw_hash'],
                                      request.form['password']):
             error = 'Invalid password'
         else:
