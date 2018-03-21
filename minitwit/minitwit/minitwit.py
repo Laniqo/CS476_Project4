@@ -158,7 +158,7 @@ def login():
         user = r.json()
         if user is None:
             error = 'Invalid username'
-        elif not check_password_hash(user['pw_hash'],
+        elif not check_password_hash(request.form['pw_hash'],
                                      request.form['password']):
             error = 'Invalid password'
         else:
