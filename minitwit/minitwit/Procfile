@@ -1,0 +1,7 @@
+web: python minitwit.py -p
+worker: bundle exec rake resque:work QUEUE=*
+clock: bundle exec rake resque:scheduler
+ticker:  ruby ./ticker 5000
+error:   ruby ./error
+utf8:    ruby ./utf8
+spawner: ./spawner
