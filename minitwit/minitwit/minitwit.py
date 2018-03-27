@@ -11,6 +11,8 @@
 
 import time
 import requests
+from requests.auth import HTTPBasicAuth
+import logging
 import mt_api
 from sqlite3 import OperationalError
 from sqlite3 import dbapi2 as sqlite3
@@ -20,6 +22,15 @@ from flask import Flask, request, session, url_for, redirect, \
      render_template, abort, g, flash, _app_ctx_stack
 from werkzeug import check_password_hash, generate_password_hash
 
+#import httplib
+#httplib.HTTPConnection.debuglevel = 1
+
+#logging.basicConfig()
+#logging.getLogger().setLevel(logging.DEBUG)
+#requests_log = logging.getLogger('requests.packages.urllib3')
+#requests_log.setLevel(logging.DEBUG)
+#requests_log.propagate = True
+
 SECRET_KEY = b'_5#y2L"F4Q8z\n\xec]/'
 
 app = Flask('minitwit')
@@ -27,7 +38,7 @@ app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
 #MT_API URL Config *******this will change to port 8080 for nginx back end ********
-URL = 'http://localhost:5101/'
+URL = 'http://localhost:8080/'
 
 def format_datetime(timestamp):
     """Format a timestamp for display."""
@@ -99,27 +110,27 @@ def user_timeline(username):
             profile_user=profile_user)
 
 
-@app.route('/<username>/follow', methods=['PUT', 'POST'])
+@app.route('/<username>/follow')
 def follow_user(username):
     """Adds the current user as follower of the given user."""
     if not g.user:
         abort(401)
 
     payload = {'current_user' : session['user_id'], 'profile_user': username}
-    r = requests.post(URL + str(username) + '/follow', json=payload)
+    r = requests.post(URL + str(username) + '/follow', json=payload, auth=HTTPBasicAuth(session['username'], session['password']))
 
     flash('You are now following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
 
 
-@app.route('/<username>/unfollow',methods=['PUT', 'DELETE'])
+@app.route('/<username>/unfollow')
 def unfollow_user(username):
     """Removes the current user as follower of the given user."""
     if not g.user:
         abort(401)
 
     payload = {'current_user' : session['user_id'], 'profile_user': username}
-    r = requests.delete(URL + str(username) + '/unfollow', json=payload)
+    r = requests.delete(URL + str(username) + '/unfollow', json=payload, auth=HTTPBasicAuth(session['username'], session['password']))
 
     flash('You are no longer following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
@@ -134,7 +145,7 @@ def add_message():
     if request.method == 'POST':
         print 'LINE 135 ********** THIS EXECUTED'
         payload = {'user_id': session['user_id'], 'text': request.form['text']}
-        r = requests.post(URL + 'post_message', json= payload, stream=True)
+        r = requests.post(URL + 'post_message', json= payload, stream=True, auth=HTTPBasicAuth(session['username'], session['password']))
         #print str(r.json())
         if r.status_code == 200:
             flash('Your message was recorded')
@@ -168,6 +179,8 @@ def login():
         else:
             flash('You were logged in')
             session['user_id'] = user['user_id']
+            session['password'] = request.form['password']
+            session['username'] = request.form['username']
             return redirect(url_for('timeline'))
 
     return render_template('login.html', error=error)

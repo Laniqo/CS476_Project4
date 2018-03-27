@@ -142,12 +142,7 @@ def followed(user_id, profile_id):
         follower.who_id = ? and follower.whom_id = ?''',
         [json_object['user_id'], json_object['profile_id']], one=True) is not None
 
-    #if user is following current profile being viewed, returns true
-    if followed:
-        return jsonify(followed)
-    #else return False
-    else:
-        return jsonify(followed)
+    return jsonify(followed)
 
 
 #helper functions that grab the user's info by user_id or username
@@ -242,6 +237,7 @@ def follow_user(username):
     return jsonify(json_object)
 
 @app.route('/<username>/unfollow', methods=['DELETE', 'GET'])
+@auth.required
 def unfollow_user(username):
     """Removes the current user as a follower of the given username parameter."""
     if not g.user:
