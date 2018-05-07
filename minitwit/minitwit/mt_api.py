@@ -304,11 +304,23 @@ def home_timeline():
     """Shows feed of the current user and all the user is following. If no user is logged in, redirect to public page"""
 
     json_object = request.get_json()
-
     msg = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user
         where message.author_id = user.user_id and (user.user_id = ? or user.user_id in (select whom_id from follower
                                 where who_id = ?)) order by message.pub_date desc limit ?''',
                                 [json_object['user_id'], json_object['user_id'], PER_PAGE])
+
+    server_num = get_server_number(json_object['user_id'])
+    user_following_ids = query_db(DATABASES[server_num], '''select follower.whom_id from follower where follower.who_id = ?''', [json_object['user_id']])
+
+    user_following_ids = map(dict, user_following_ids)
+    print user_following_ids
+
+    if user_following_ids is not None:
+        for uid in user_following_ids:
+            print uid['whom_id']
+            following_msgs = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user where
+            message.author_id = user.user_id and (user.user_id = ?)''', [uid['whom_id']])
+            msg.extend(following_msgs)
 
     msg = map(dict, msg)
     msg = sorted(msg, key=lambda msg: msg['pub_date'], reverse=True)
@@ -321,7 +333,7 @@ def user_timeline(username):
     """Returns the messages/posts of a specific user"""
     if(len(username) == 0):
         abort(404)
-    
+
     json_object = request.get_json()
     uid = get_user_id(json_object['username'])
     server_num = get_server_number(uid)
