@@ -38,7 +38,7 @@ app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
 #MT_API URL Config *******this will change to port 8080 for nginx back end ********
-URL = 'http://localhost:8080/'
+URL = 'http://localhost:5001/'
 
 def format_datetime(timestamp):
     """Format a timestamp for display."""
