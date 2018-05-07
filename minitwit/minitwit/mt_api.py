@@ -447,7 +447,7 @@ def register():
                 db = get_db(DATABASES[server_num])
                 password = generate_password_hash(data['password'])
                 db.execute('''insert into user (user_id, username, email, pw_hash) values (?, ?, ?, ?)'''
-                ,[uid, data['username'], data['email'], password])
+                ,[str(uid), data['username'], data['email'], password])
                 db.commit()
                 return jsonify({'username': data['username'], 'email': data['email'], 'status': 'Successfully registered.', 'status code':201})
 
