@@ -29,15 +29,9 @@ DATABASES.append(DATABASE2)
 f = os.path.join(app.root_path, DATABASE3)
 DATABASES.append(DATABASE3)
 
+
 app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
-
-#DATABASE = os.path.join(app.root_path, 'database.db')
-
-
-#for filename in os.listdir(app.root_path):
-#    f = os.path.join(DIRECTORY,filename)
-#    DATABASES.append(f)
 
 def query_db(database, query, args=(), one=False):
     """Queries the database and returns a list of dictionaries."""
@@ -61,30 +55,29 @@ def query_all_db(query, args=(), one=False):
     return (ret[0] if ret else None) if one else ret
 
 
-#pass the Database 1 2 or 3
+
 def get_db(database):
     """Opens a new database connection if there is none yet for the
-    current application context.
+    current application context. Checks for which database is being passed first before it
+    opens a connection.
     """
     top = _app_ctx_stack.top
 
-    if not hasattr(top, 'sqlite_db1') and database == DATABASE1:
-        top.sqlite_db1 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
-        top.sqlite_db1.row_factory = sqlite3.Row
-    if not hasattr(top, 'sqlite_db2') and database == DATABASE2:
-        top.sqlite_db2 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
-        top.sqlite_db2.row_factory = sqlite3.Row
-    if not hasattr(top, 'sqlite_db3') and database == DATABASE3:
-        top.sqlite_db3 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
-        top.sqlite_db3.row_factory = sqlite3.Row
-
     if database == DATABASE1:
+        if not hasattr(top, 'sqlite_db1'):
+            top.sqlite_db1 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
+            top.sqlite_db1.row_factory = sqlite3.Row
         return top.sqlite_db1
     if database == DATABASE2:
+        if not hasattr(top, 'sqlite_db2'):
+            top.sqlite_db2 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
+            top.sqlite_db2.row_factory = sqlite3.Row
         return top.sqlite_db2
     if database == DATABASE3:
+        if not hasattr(top, 'sqlite_db3') and database == DATABASE3:
+            top.sqlite_db3 = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES)
+            top.sqlite_db3.row_factory = sqlite3.Row
         return top.sqlite_db3
-
 
 @app.teardown_appcontext
 def close_database(exception):
@@ -113,13 +106,13 @@ def populatedb_command():
 
 
 def get_server_number(uid):
+    """returns the shard key based on user's user_id"""
     str_uid = str(uid)
     result = (uuid.UUID(str_uid).int % NUMOFSERVERS)
     return result
 
 def populate_db():
-    #Populates the database.
-    #db = get_db()
+    """Populates the database."""
     queries = []
 
     fd1 = open('population.sql', 'r')
@@ -143,6 +136,7 @@ def populate_db():
         sqlCommands = query.split(';')
         for command in sqlCommands:
             try:
+                #if command has '?' then it replaces it with a newly generated uuid
                 if command.find('?') != -1:
                     uid = uuid.uuid4()
                     str_uid = str(uid)
@@ -162,10 +156,7 @@ def populate_db():
 
 def init_db():
     """Initializes the database."""
-    #db = get_db()
-    #with app.open_resource('schema.sql', mode='r') as f:
-    #    db.cursor().executescript(f.read())
-    #db.commit()
+
     schema = open('schema.sql', 'r')
     schema_commands = schema.read()
     schema.close();
@@ -180,22 +171,6 @@ def init_db():
             db.commit()
         except sqlite3.Error, err:
             print " [INFO] %s " % err
-
-    #with sqlite3.connect(DATABASES[0], detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-    #    conn.text_factory = str
-    #    cur = conn.cursor()
-    #    cur.executescript(schema_commands)
-
-    #with sqlite3.connect(DATABASES[1], detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-    #    conn.text_factory = str
-    #    cur = conn.cursor()
-    #    cur.executescript(schema_commands)
-
-    #with sqlite3.connect(DATABASES[2], detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-    #    conn.text_factory = str
-    #    cur = conn.cursor()
-    #    cur.executescript(schema_commands)
-
 
 class DatabaseAuth(BasicAuth):
     def __init__(self, app):
@@ -215,7 +190,7 @@ class DatabaseAuth(BasicAuth):
             return True
         else:
             return False
-		    #abort(make_response(jsonify(message="Unauthorized access. Correct username and password required"), 401))
+
 
 
 auth = DatabaseAuth(app)
@@ -251,10 +226,9 @@ def get_user_name(user_id):
     return rv[0] if rv else None
 
 
-#added this for the timeline page to check if current user is following
-#the user of the current profile being viewed
 @app.route('/followed/<user_id>/<profile_id>', methods=['GET', 'POST'])
 def followed(user_id, profile_id):
+    """check if current user is following the user of the current profile being viewed"""
     json_object = request.get_json()
     server_num = get_server_number(json_object['user_id'])
     followed = query_db( DATABASES[server_num],'''select 1 from follower where
@@ -264,9 +238,9 @@ def followed(user_id, profile_id):
     return jsonify(followed)
 
 
-#helper functions that grab the user's info by user_id or username
 @app.route('/user_info/<user_id>', methods=['GET', 'POST'])
 def user_info(user_id):
+    """helper function that returns user info based on their user_id"""
     json_object = request.get_json()
     server_num = get_server_number(json_object['user_id'])
 
@@ -278,6 +252,7 @@ def user_info(user_id):
 
 @app.route('/confirm_username/<username>', methods=['GET', 'POST'])
 def confirm_username(username):
+    """confirms the username exists in the database"""
     json_object = request.get_json()
     user = query_all_db('select * from user where username = ?', [json_object['username']], one=True)
 
@@ -290,6 +265,7 @@ def confirm_username(username):
 @app.route('/posts/public', methods=['GET'])
 def public_thread():
     '''Returns all the posted msgs of all users'''
+    
     msg = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user
     where message.author_id = user.user_id
     order by message.pub_date desc limit ?''', [PER_PAGE])
