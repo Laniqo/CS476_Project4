@@ -47,7 +47,7 @@ def query_all_db(query, args=(), one=False):
         try:
             cur = get_db(database).execute(query, args)
             for row in cur.fetchall():
-                print "-- values: %s" % (row)
+                print "-- values: %s" % (dict(row))
                 ret.append(row)
         except sqlite3.Error, err:
             print "[Error] %s" %err
@@ -117,19 +117,32 @@ def populate_db():
 
     fd1 = open('population.sql', 'r')
     populate1 = fd1.read()
-    queries.append(populate1)
+    commands = populate1.split(';')
+    db = get_db(DATABASES[0])
+    for command in commands:
+        db.cursor().execute(command)
+    db.commit()
     fd1.close();
 
     fd2 = open('population2.sql', 'r')
     populate2 = fd2.read()
-    queries.append(populate2)
+    commands = populate2.split(';')
+    db = get_db(DATABASES[1])
+    for command in commands:
+        db.cursor().execute(command)
+    db.commit()
     fd2.close();
 
     fd3 = open('population3.sql', 'r')
     populate3 = fd3.read()
-    queries.append(populate3)
+    commands = populate3.split(';')
+    db = get_db(DATABASES[2])
+    for command in commands:
+        db.cursor().execute(command)
+    db.commit()
     fd3.close();
 
+"""
     counter = 0
 
     for query in queries:
@@ -143,6 +156,8 @@ def populate_db():
                     command = command.replace('?', str_uid, 1 )
                     db_number = get_server_number(uid)
                     db = get_db(DATABASES[db_number])
+                    #import pdb; pdb.set_trace()
+                    #print 'ABOUT TO EXECUTE', repr(command)
                     db.cursor().execute(command)
                     db.commit()
                 else:
@@ -152,7 +167,7 @@ def populate_db():
             except OperationalError, msg:
                 print "Command skipped: ", msg
         counter+=1
-
+"""
 
 def init_db():
     """Initializes the database."""
@@ -262,40 +277,65 @@ def confirm_username(username):
     user = dict(user)
     return jsonify(user);
 
+#import pdb; pdb.set_trace()
 @app.route('/posts/public', methods=['GET'])
 def public_thread():
     '''Returns all the posted msgs of all users'''
-    
+    """
+    DON'T QUERY ALL THE DATABASES!
     msg = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user
     where message.author_id = user.user_id
     order by message.pub_date desc limit ?''', [PER_PAGE])
 
+    """
+    msg = []
+    for count in range(0,3):
+        get_msgs =  query_db(DATABASES[count], '''select message.*, user.user_id, user.username, user.email from message, user
+    where message.author_id = user.user_id''')
+        msg.extend(get_msgs)
+    
+
     msg = map(dict, msg)
     msg = sorted(msg, key=lambda msg: msg['pub_date'], reverse=True)
+    print msg
     return jsonify(msg)
-
 
 @app.route('/home', methods=['GET'])
 def home_timeline():
     """Shows feed of the current user and all the user is following. If no user is logged in, redirect to public page"""
 
     json_object = request.get_json()
+    #import pdb; pdb.set_trace()
+    """
+    DON'T QUERY ALL THE DATABASES!
     msg = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user
         where message.author_id = user.user_id and (user.user_id = ? or user.user_id in (select whom_id from follower
                                 where who_id = ?)) order by message.pub_date desc limit ?''',
                                 [json_object['user_id'], json_object['user_id'], PER_PAGE])
-
+    """
     server_num = get_server_number(json_object['user_id'])
+    msg = query_db(DATABASES[server_num], '''select message.*, user.user_id, user.username, user.email from message, user where
+            message.author_id = user.user_id and (user.user_id = ?)''', [json_object['user_id']])
+
     user_following_ids = query_db(DATABASES[server_num], '''select follower.whom_id from follower where follower.who_id = ?''', [json_object['user_id']])
 
     user_following_ids = map(dict, user_following_ids)
     print user_following_ids
-
+            
     if user_following_ids is not None:
         for uid in user_following_ids:
             print uid['whom_id']
+            
+            whom_server_num = get_server_number(uid['whom_id'])
+            following_msgs = query_db(DATABASES[whom_server_num], '''select message.*, user.user_id, user.username, user.email from message, user where
+            message.author_id = user.user_id and (user.user_id = ?)''', [uid['whom_id']])
+            
+            """
+            DON'T QUERY ALL THE DATABASES!
             following_msgs = query_all_db('''select message.*, user.user_id, user.username, user.email from message, user where
             message.author_id = user.user_id and (user.user_id = ?)''', [uid['whom_id']])
+            """
+
             msg.extend(following_msgs)
 
     msg = map(dict, msg)
