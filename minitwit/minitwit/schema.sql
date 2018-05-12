@@ -14,8 +14,8 @@ create table follower (
 
 drop table if exists message;
 create table message (
-  message_id integer primary key autoincrement,
-  author_id GUID,
+  message_id GUID primary key,
+  author_id GUID not null,
   text text not null,
   pub_date integer
 );
